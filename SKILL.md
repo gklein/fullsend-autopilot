@@ -46,6 +46,40 @@ Report after each phase: `[autopilot] Phase N/7 — <Name> — <outcome>`
 
 ---
 
+## Data Sanitization
+
+**All text posted to GitHub** (issue bodies, comments, commit messages) must
+be free of local environment data. Never include:
+
+- Absolute local file paths (`/Users/…`, `/home/…`, `/var/folders/…`)
+- Local hostnames, FQDNs, or IP addresses
+- Environment variable values (tokens, passwords, API keys, secrets)
+- Local OS usernames or personal identifiers
+- Database connection strings with credentials
+- Auth headers (`Bearer …`, `Basic …`)
+
+**Rules:**
+
+1. Use **repo-relative paths** when referencing files — write `src/main.go:42`,
+   not `/Users/alice/project/src/main.go:42`.
+2. When including test output or error messages in a GitHub comment, strip
+   absolute paths and replace with repo-relative equivalents.
+3. Never quote raw environment variable values. If an env var is relevant,
+   name it (`$DATABASE_URL is unset`) without printing the value.
+4. **Pipe every GitHub-bound body** through the sanitizer as a safety net:
+
+```bash
+bash ${CLAUDE_SKILL_DIR}/scripts/sanitize.sh <<'EOF'
+<body text>
+EOF
+```
+
+The sanitizer masks home-directory paths, hostnames, IPs, known token
+patterns (GitHub, AWS, GCP, Slack, OpenAI, JWTs), secret-like env-var
+assignments, database connection strings, and HTTP auth headers.
+
+---
+
 ## Phase 0 — Sync to latest code
 
 1. Determine the default branch:
@@ -132,8 +166,10 @@ For each: test name, file, and what it asserts.>
 
 ### 1.5 Create the issue
 
+Sanitize the body before posting — use repo-relative paths, no secrets:
+
 ```bash
-gh issue create --title "<title>" --body "$(cat <<'ISSUE_EOF'
+gh issue create --title "<title>" --body "$(bash ${CLAUDE_SKILL_DIR}/scripts/sanitize.sh <<'ISSUE_EOF'
 <body>
 ISSUE_EOF
 )"
@@ -177,11 +213,20 @@ Route based on labels:
 
 | Label | Route |
 |-------|-------|
-| `needs-info` | AI answers from code. Pull latest, scan for answers, post comment. Wait for re-triage. If still `needs-info`, **STOP**. |
+| `needs-info` | AI answers from code. Pull latest, scan for answers, **sanitize** and post comment. Wait for re-triage. If still `needs-info`, **STOP**. |
 | `duplicate` | **STOP.** Report the original issue. |
 | `blocked` | **STOP.** Report the blocker. |
 | `ready-to-code` / `triaged` | Proceed to Phase 3. |
 | None of the above | **STOP.** Print labels. |
+
+When posting a `needs-info` answer, pipe through the sanitizer:
+
+```bash
+gh issue comment <ISSUE_NUMBER> --body "$(bash ${CLAUDE_SKILL_DIR}/scripts/sanitize.sh <<'INFO_EOF'
+<answer using repo-relative paths, no secrets or local env data>
+INFO_EOF
+)"
+```
 
 ---
 
@@ -273,9 +318,10 @@ Detect the test framework and run tests:
 - Node: `npm test`
 - Make: `make test` if a Makefile with a `test` target exists
 
-Capture any test failures — test name, file, error output. If failures
-are found, they will be included as additional context in the first
-`/fs-fix` comment in Phase 5.
+Capture any test failures — test name, file, error output. **Sanitize
+all test output** (strip absolute paths, replace with repo-relative).
+If failures are found, they will be included as additional context in
+the first `/fs-fix` comment in Phase 5.
 
 ---
 
@@ -335,23 +381,26 @@ If the fork check from step 4.3 returned `FORK`, **STOP** and report:
 
 Increment: `FIX_ROUND=$((FIX_ROUND + 1))`
 
+**Sanitize before posting** — use repo-relative paths in file references,
+strip absolute paths and secrets from any quoted test output:
+
 ```bash
 REVIEW_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-gh pr comment <PR_NUMBER> --body "$(cat <<'FIX_EOF'
+gh pr comment <PR_NUMBER> --body "$(bash ${CLAUDE_SKILL_DIR}/scripts/sanitize.sh <<'FIX_EOF'
 /fs-fix
 
 ## Review feedback to address
 
 <For each new review item:
-- File and line (if inline comment)
+- File and line (repo-relative, if inline comment)
 - Reviewer's comment (quoted)
 - What needs to change>
 
 ## Local test failures
 
 <For each local test failure (if any):
-- Test name and file
-- Error output
+- Test name and file (repo-relative)
+- Error output (sanitized — no absolute paths or env values)
 - What likely needs to change>
 
 FIX_EOF
@@ -521,3 +570,4 @@ Exit codes:
 - Max 10 fix rounds before escalating to user.
 - Never force-push. Resolve conflicts via merge commits. Squash-merge PRs.
 - Never post `/fs-fix` on fork PRs.
+- All GitHub-bound text must pass through `sanitize.sh` — see "Data Sanitization".

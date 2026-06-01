@@ -30,6 +30,7 @@ The skill has two layers:
 | `check-labels.sh` | Fetch labels on an issue or PR | 0=ok, 1=error |
 | `find-pr-for-issue.sh` | Locate the PR linked to an issue (prefers bot PRs) | 0=found, 1=not found |
 | `get-review-feedback.sh` | Collect review decisions, inline comments, action status | always 0 |
+| `sanitize.sh` | Strip PII/secrets from stdin before posting to GitHub | always 0 |
 
 Scripts share a common pattern: resolve `REPO` via `gh repo view`, validate args, call `gh api`, parse with `jq`. All use `set -euo pipefail`.
 
@@ -39,6 +40,7 @@ Scripts share a common pattern: resolve `REPO` via `gh repo view`, validate args
 - **Label-driven routing** — the state machine routes on GitHub labels (`ready-to-code`, `needs-info`, `blocked`, `ready-for-merge`, etc.), not on comment content parsing.
 - **Fork safety** — fork PRs are detected once (Phase 4.3) and block `/fs-fix` in Phase 5, because the fix agent can't push to fork branches.
 - **Fallback polling** — if `wait-for-run.sh` can't find a run (GitHub webhook lag), the skill falls back to polling with `check-comments.sh` + `check-action-status.sh`.
+- **PII sanitization** — all GitHub-bound text (issue bodies, comments, commit messages) is piped through `sanitize.sh` which masks local paths, hostnames, IPs, tokens, secrets, and connection strings. The prompt also instructs Claude to use repo-relative paths and avoid leaking env-var values. Defense in depth: prompt constraints + script safety net.
 
 ## Shell script conventions
 
