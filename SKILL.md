@@ -378,7 +378,17 @@ gh pr checks <PR_NUMBER> --watch --fail-fast
 git checkout <PR_BRANCH> && git pull origin <PR_BRANCH>
 ```
 
-Run the same test suite as step 4.4. Capture any new failures.
+Run the same test suite as step 4.4. If tests fail and the fix is
+trivial (e.g. a test assertion matching a panel border), fix and push
+locally, then **wait for the review workflow to re-run**:
+
+```bash
+gh pr checks <PR_NUMBER> --watch --fail-fast
+```
+
+Poll `reviewDecision` until it returns a value (sleep 30, max 20
+retries). The review bot must evaluate the latest commit before the
+loop can check approval status.
 
 ### 5.9 Loop back to 5.2
 
@@ -389,13 +399,26 @@ rounds exhausted → **STOP**.
 
 ## Phase 6 — Merge
 
-### 6.1 Verify approval
+### 6.1 Wait for checks and verify approval
+
+First, wait for all PR checks (including the review workflow) to finish:
+
+```bash
+gh pr checks <PR_NUMBER> --watch --fail-fast
+```
+
+Run with **timeout 600000**. If no checks are configured, proceed.
+
+Then poll for the review decision — the review bot may take time to
+post its verdict after checks pass:
 
 ```bash
 gh pr view <PR_NUMBER> --json reviewDecision --jq .reviewDecision
 ```
 
-The decision must be `APPROVED`. If not, go back to Phase 5.
+If the result is empty or not `APPROVED`, sleep 30 seconds and retry.
+Max 20 retries (~10 minutes). If still not `APPROVED` after retries,
+go back to Phase 5.
 
 ### 6.2 Check for merge conflicts
 
