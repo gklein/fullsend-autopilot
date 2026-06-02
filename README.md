@@ -1,10 +1,10 @@
 # fullsend-autopilot
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that drives an idea from description to merged PR — unattended. It orchestrates the [fullsend](https://github.com/fullsendai/fullsend) pipeline: triage, prioritize, code, review, fix, and merge — all autonomously.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that drives an idea from description to merged PR — unattended. It orchestrates the [fullsend](https://github.com/fullsendai/fullsend) pipeline: triage, prioritize, code, review, fix, and merge — all autonomously. Can also start from an existing PR to drive just the review/fix, merge, and retro phases.
 
 ## What it does
 
-Give it a bug description, feature request, or existing GitHub issue. The skill will:
+Give it a bug description, feature request, existing GitHub issue, or PR. The skill will:
 
 1. **Scan** the codebase for relevant context
 2. **Create** a detailed GitHub issue (or use an existing one)
@@ -32,7 +32,7 @@ cp -r fullsend-autopilot ~/.claude/skills/
 
 ## Usage
 
-Invoke from Claude Code with a description or issue reference:
+Invoke from Claude Code with a description, issue reference, or PR reference:
 
 ```
 /fullsend-autopilot Add rate limiting to the /api/upload endpoint
@@ -45,6 +45,22 @@ Invoke from Claude Code with a description or issue reference:
 ```
 /fullsend-autopilot https://github.com/owner/repo/issues/42
 ```
+
+Start from an existing PR (skips issue/triage/prioritize/code, jumps to review/fix):
+
+```
+/fullsend-autopilot !42
+```
+
+```
+/fullsend-autopilot PR #42
+```
+
+```
+/fullsend-autopilot https://github.com/owner/repo/pull/42
+```
+
+When using `#NNN`, the skill auto-detects whether it's an issue or PR.
 
 ## How it works
 

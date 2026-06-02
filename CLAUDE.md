@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A Claude Code skill that takes a bug description or feature request and drives it through the full [fullsend](https://github.com/fullsendai/fullsend) pipeline — issue creation, triage, prioritize, code, review/fix loop, merge, retro — unattended.
+A Claude Code skill that takes a bug description, feature request, or existing PR and drives it through the full [fullsend](https://github.com/fullsendai/fullsend) pipeline — issue creation, triage, prioritize, code, review/fix loop, merge, retro — unattended. When started from a PR, it skips issue/triage/prioritize/code phases and jumps directly to review/fix, merge, and retro.
 
 ## Linting
 
@@ -38,7 +38,8 @@ Scripts share a common pattern: resolve `REPO` via `gh repo view`, validate args
 
 - **Actor+timestamp+title+command matching** — workflow runs are found by matching the current `gh` user, a timestamp, the issue/PR `display_title`, and optionally verifying the run contains a non-skipped `dispatch / <Command>` job. This prevents latching onto runs from other issues or prior phases.
 - **Label-driven routing** — the state machine routes on GitHub labels (`ready-to-code`, `needs-info`, `blocked`, `ready-for-merge`, etc.), not on comment content parsing.
-- **Fork safety** — fork PRs are detected once (Phase 4.3) and block `/fs-fix` in Phase 5, because the fix agent can't push to fork branches.
+- **Fork safety** — fork PRs are detected once (Phase 4.3, or Phase 0 step 3 in PR mode) and block `/fs-fix` in Phase 5, because the fix agent can't push to fork branches.
+- **PR-mode entry** — when started from a PR (`!NNN`, PR URL, or `#NNN` that resolves to a PR), the skill skips Phases 1–4 and enters directly at Phase 5 (review/fix loop). The linked issue is discovered from the PR body if available, enabling retro to post on both.
 - **Fallback polling** — if `wait-for-run.sh` can't find a run (GitHub webhook lag), the skill falls back to polling with `check-comments.sh` + `check-action-status.sh`.
 - **PII sanitization** — all GitHub-bound text (issue bodies, comments, commit messages) is piped through `sanitize.sh` which masks local paths, hostnames, IPs, tokens, secrets, and connection strings. The prompt also instructs Claude to use repo-relative paths and avoid leaking env-var values. Defense in depth: prompt constraints + script safety net.
 

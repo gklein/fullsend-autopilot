@@ -3,8 +3,10 @@ name: fullsend-autopilot
 description: >
   Orchestrates the complete fullsend pipeline — scans the codebase, creates
   or locates a GitHub issue, then drives triage, prioritize, code, review/fix,
-  merge, and retro to completion unattended. Invoked when a user wants to go
-  from an idea or issue reference to a merged PR with zero manual steps.
+  merge, and retro to completion unattended. Can also start from an existing
+  PR to drive just the review/fix, merge, and retro phases. Invoked when a
+  user wants to go from an idea, issue, or PR reference to a merged PR with
+  zero manual steps.
 allowed-tools: >
   Bash(gh issue *)
   Bash(gh pr *)
@@ -25,11 +27,14 @@ allowed-tools: >
 
 # Fullsend Autopilot
 
-**Input:** `$ARGUMENTS` — free-text description, GitHub issue URL, or `#NNN`.
+**Input:** `$ARGUMENTS` — free-text description, GitHub issue/PR URL,
+`#NNN` (auto-detected as issue or PR), `!NNN` (PR), or `PR #NNN` (PR).
 
 ## Progress
 
-Print this checklist at the start. Update after each phase:
+Print this checklist at the start. Update after each phase.
+
+**Standard checklist (issue or new-issue mode):**
 
 ```
 - [ ] Phase 0 — Sync
@@ -37,6 +42,19 @@ Print this checklist at the start. Update after each phase:
 - [ ] Phase 2 — Triage
 - [ ] Phase 3 — Prioritize
 - [ ] Phase 4 — Code
+- [ ] Phase 5 — Review/Fix
+- [ ] Phase 6 — Merge
+- [ ] Phase 7 — Retro
+```
+
+**PR-mode checklist** (when input is a PR reference):
+
+```
+- [ ] Phase 0 — Sync
+- [-] Phase 1 — Issue (skipped — PR mode)
+- [-] Phase 2 — Triage (skipped — PR mode)
+- [-] Phase 3 — Prioritize (skipped — PR mode)
+- [-] Phase 4 — Code (skipped — PR mode)
 - [ ] Phase 5 — Review/Fix
 - [ ] Phase 6 — Merge
 - [ ] Phase 7 — Retro
@@ -80,6 +98,66 @@ assignments, database connection strings, and HTTP auth headers.
 
 ---
 
+## Input Detection
+
+Parse `$ARGUMENTS` to determine the operating mode **before any phase runs**.
+Check patterns in this order (first match wins):
+
+| Input form | Mode | Extracted |
+|---|---|---|
+| `https://github.com/.../pull/NNN` | **PR** | `PR_NUMBER` = NNN |
+| `!NNN` | **PR** | `PR_NUMBER` = NNN |
+| `PR #NNN` or `pr #NNN` | **PR** | `PR_NUMBER` = NNN |
+| `https://github.com/.../issues/NNN` | **Issue** | `ISSUE_NUMBER` = NNN |
+| `#NNN` | **Ambiguous** | NUMBER = NNN — disambiguate below |
+| Anything else | **New-issue** | — |
+
+### Disambiguate `#NNN`
+
+When the input is bare `#NNN`, determine whether it is a PR or an issue:
+
+```bash
+gh pr view NNN --json number --jq .number 2>/dev/null
+```
+
+If this succeeds (exit 0), `#NNN` is a PR → **PR mode** with `PR_NUMBER` = NNN.
+If it fails (exit 1), treat as an issue → **Issue mode** with `ISSUE_NUMBER` = NNN.
+
+### PR mode setup
+
+Verify the PR exists and is open:
+
+```bash
+gh pr view <PR_NUMBER> --json state,number,title,headRefName \
+  --jq '{state, number, title, branch: .headRefName}'
+```
+
+If the PR state is `MERGED` or `CLOSED`, **STOP** with a message:
+"PR #NNN is already <state>. Nothing to do."
+
+Attempt to discover a linked issue:
+
+```bash
+ISSUE_NUMBER=$(gh pr view <PR_NUMBER> --json body --jq '.body' 2>/dev/null \
+  | grep -oiE '(closes|fixes|resolves|close|fix|resolve) #([0-9]+)' \
+  | head -1 | grep -oE '[0-9]+' || echo "")
+```
+
+If empty, `ISSUE_NUMBER` remains unset — Phase 7 will adapt.
+
+**Skip Phases 1–4. Proceed to Phase 0 (PR variant), then Phase 5.**
+
+### Issue mode
+
+Extract `ISSUE_NUMBER`. Proceed to Phase 0, then Phase 2.
+
+### New-issue mode
+
+Treat `$ARGUMENTS` as a free-text description. Proceed to Phase 0, then
+Phase 1.
+
+---
+
 ## Phase 0 — Sync to latest code
 
 1. Determine the default branch:
@@ -95,7 +173,18 @@ assignments, database connection strings, and HTTP auth headers.
    git pull origin "$DEFAULT_BRANCH"
    ```
 
-3. If an existing issue is provided, check for a feature branch:
+3. **PR mode:** Check out the PR branch and determine fork status:
+   ```bash
+   gh pr checkout <PR_NUMBER>
+   ```
+   ```bash
+   REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+   IS_FORK=$(gh api "repos/${REPO}/pulls/<PR_NUMBER>" \
+     --jq 'if .head.repo.full_name != .base.repo.full_name then "FORK" else "SAME" end')
+   ```
+
+4. **Issue/new-issue mode:** If an existing issue is provided, check for a
+   feature branch:
    ```bash
    git branch -r --list "origin/agent/<ISSUE_NUMBER>-*"
    ```
@@ -105,10 +194,13 @@ assignments, database connection strings, and HTTP auth headers.
 
 ## Phase 1 — Create or locate the issue
 
+> **PR mode:** Skip this entire phase. Phases 2, 3, and 4 are also skipped.
+> Jump directly to Phase 5.
+
 ### 1.1 Detect input type
 
-Parse `$ARGUMENTS`: GitHub issue URL or `#NNN` → skip to Phase 2.
-Free-text description → continue to 1.2.
+Input detection is handled in the "Input Detection" section above.
+If **issue mode**, skip to Phase 2. If **new-issue mode**, continue to 1.2.
 
 ### 1.2 Scan the codebase for context
 
@@ -179,6 +271,8 @@ ISSUE_EOF
 
 ## Phase 2 — Triage
 
+> **PR mode:** Skip this phase entirely.
+
 ### 2.1 Post the triage command
 
 ```bash
@@ -232,6 +326,8 @@ INFO_EOF
 
 ## Phase 3 — Prioritize
 
+> **PR mode:** Skip this phase entirely.
+
 ### 3.1 Post the prioritize command
 
 ```bash
@@ -258,6 +354,8 @@ Proceed to Phase 4.
 ---
 
 ## Phase 4 — Code
+
+> **PR mode:** Skip this phase entirely.
 
 ### 4.0 Pre-check blocking labels
 
@@ -327,6 +425,28 @@ the first `/fs-fix` comment in Phase 5.
 
 ## Phase 5 — Review and fix loop
 
+> In **PR mode**, `PR_NUMBER` and `IS_FORK` are already set from Input
+> Detection and Phase 0. Phase 4.4's local test run has not occurred yet,
+> so perform it now before entering the review loop.
+
+### 5.0 Initial local test run (PR mode only)
+
+If entering Phase 5 from PR mode (Phase 4 was skipped), run the local
+test suite first. The PR branch is already checked out from Phase 0.
+
+Detect the test framework and run tests:
+- Go: `go test ./...` or `make test` / `make go-test`
+- Python: `pytest` or `python -m pytest`
+- Node: `npm test`
+- Make: `make test` if a Makefile with a `test` target exists
+
+Capture any test failures — test name, file, error output. **Sanitize
+all test output** (strip absolute paths, replace with repo-relative).
+If failures are found, they will be included as additional context in
+the first `/fs-fix` comment in step 5.6.
+
+---
+
 This loop continues until the PR is approved with no outstanding
 feedback, or 10 fix rounds are exhausted.
 
@@ -374,7 +494,8 @@ fixed that have not regressed.
 
 ### 5.5 Check for fork PR
 
-If the fork check from step 4.3 returned `FORK`, **STOP** and report:
+If the fork check (from Phase 0 step 3 in PR mode, or step 4.3 in
+issue mode) returned `FORK`, **STOP** and report:
 "Fork PR — fix agent blocked for security. Manual fixes required."
 
 ### 5.6 Post /fs-fix with content
@@ -505,16 +626,18 @@ gh pr merge <PR_NUMBER> --merge-queue
 
 ## Phase 7 — Cleanup and retrospective
 
-1. Close the issue if still open:
+1. Close the issue if known and still open:
    ```bash
+   # Only if ISSUE_NUMBER is set (skip in PR mode with no linked issue)
    STATE=$(gh issue view <ISSUE_NUMBER> --json state --jq .state)
    gh issue close <ISSUE_NUMBER>  # only if still open
    ```
 
-2. Post `/fs-retro` on both the issue and PR (do not wait):
+2. Post `/fs-retro` (do not wait):
    ```bash
-   gh issue comment <ISSUE_NUMBER> --body "/fs-retro"
    gh pr comment <PR_NUMBER> --body "/fs-retro"
+   # Only if ISSUE_NUMBER is set:
+   gh issue comment <ISSUE_NUMBER> --body "/fs-retro"
    ```
 
 3. Print pipeline summary:
@@ -522,11 +645,11 @@ gh pr merge <PR_NUMBER> --merge-queue
 ```
 [autopilot] ═══ Pipeline Complete ═══
 
-Issue:    #<NUMBER> — <title> — <url>
+Issue:    #<NUMBER> — <title> — <url>    (or "N/A — started from PR" if no linked issue)
 PR:       #<NUMBER> — <title> — <url>
-Triage:   <outcome label>
-RICE:     <score or "not scored">
-Code:     PR created by <author>
+Triage:   <outcome label>                (or "skipped — PR mode")
+RICE:     <score or "not scored">        (or "skipped — PR mode")
+Code:     PR created by <author>         (or "skipped — PR mode")
 Review:   <disposition>
 Fix:      <N> round(s)
 Merge:    <direct merge | merge queue>
