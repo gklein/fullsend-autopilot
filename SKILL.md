@@ -295,10 +295,13 @@ Run with **timeout 600000**. Handle exit codes:
 bash ${CLAUDE_SKILL_DIR}/scripts/check-comments.sh issue <ISSUE_NUMBER> "$BEFORE_TS"
 ```
 
-### 2.4 Check triage outcome labels
+### 2.4 Wait for triage outcome labels
+
+Poll every 60 seconds until a routing label appears:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/check-labels.sh issue <ISSUE_NUMBER>
+bash ${CLAUDE_SKILL_DIR}/scripts/wait-for-label.sh issue <ISSUE_NUMBER> \
+  "ready-to-code|triaged|needs-info|duplicate|blocked"
 ```
 
 Route based on labels:
@@ -440,10 +443,13 @@ Check the `ACTION STATUS` section first:
 - If **"AGENT STILL RUNNING"** — sleep 60, retry step 4.1.
 - If **"AGENT JOB FAILED"** — report failure with URL and stop.
 
-### 4.3 Check review outcome labels
+### 4.3 Wait for review outcome labels
+
+Poll every 60 seconds until a routing label appears:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/check-labels.sh pr <PR_NUMBER>
+bash ${CLAUDE_SKILL_DIR}/scripts/wait-for-label.sh pr <PR_NUMBER> \
+  "ready-for-merge|requires-manual-review|rejected|needs-human|fullsend-no-fix|changes-requested|approved"
 ```
 
 | Label | Route |
@@ -525,7 +531,7 @@ locally, then **wait for the review workflow to re-run**:
 gh pr checks <PR_NUMBER> --watch --fail-fast
 ```
 
-Poll `reviewDecision` until it returns a value (sleep 30, max 20
+Poll `reviewDecision` until it returns a value (sleep 60, max 20
 retries). The review bot must evaluate the latest commit before the
 loop can check approval status.
 
@@ -555,8 +561,8 @@ post its verdict after checks pass:
 gh pr view <PR_NUMBER> --json reviewDecision --jq .reviewDecision
 ```
 
-If the result is empty or not `APPROVED`, sleep 30 seconds and retry.
-Max 20 retries (~10 minutes). If still not `APPROVED` after retries,
+If the result is empty or not `APPROVED`, sleep 60 seconds and retry.
+Max 20 retries (~20 minutes). If still not `APPROVED` after retries,
 go back to Phase 4.
 
 ### 5.2 Check for merge conflicts
@@ -628,26 +634,47 @@ Retro:    commands sent (results pending)
 
 ## Appendix — Fallback polling
 
+**All polling uses 60-second intervals.** Never use a single long sleep
+(e.g. `sleep 600`) followed by one check — always loop.
+
 If `wait-for-run.sh` exits 1 (no run found) or the Bash tool times out,
-fall back to manual polling with `check-comments.sh` and
-`check-action-status.sh`:
+fall back to a polling loop with `check-comments.sh` and
+`check-action-status.sh`. Run this loop directly — **do not sleep for
+longer than 60 seconds between checks**:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/check-comments.sh <issue|pr> <NUMBER> "$BEFORE_TS"
+for i in $(seq 1 20); do
+  COMMENTS=$(bash ${CLAUDE_SKILL_DIR}/scripts/check-comments.sh <issue|pr> <NUMBER> "$BEFORE_TS" 2>&1) && break
+  STATUS=$(bash ${CLAUDE_SKILL_DIR}/scripts/check-action-status.sh <issue|pr> <NUMBER> "$BEFORE_TS" 2>&1)
+  EXIT_CODE=$?
+  if [[ $EXIT_CODE -eq 2 ]]; then
+    echo "ACTION FAILED: $STATUS"
+    break
+  fi
+  echo "Poll ${i}/20: waiting 60s..."
+  sleep 60
+done
 ```
 
-Exit codes:
+Exit codes for `check-comments.sh`:
 - **0** — new comments found. Proceed.
-- **1** — no new comments. Check action status below.
+- **1** — no new comments. Check action status.
+
+Exit codes for `check-action-status.sh`:
+- **0** — dispatch action still running. Sleep 60 seconds, retry.
+- **1** — nothing happening. Sleep 60 seconds, retry.
+- **2** — dispatch action failed. Report failure with URL.
+
+For **label polling**, use `wait-for-label.sh` which encapsulates the
+60-second polling loop:
 
 ```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/check-action-status.sh <issue|pr> <NUMBER> "$BEFORE_TS"
+bash ${CLAUDE_SKILL_DIR}/scripts/wait-for-label.sh <issue|pr> <NUMBER> "<label-pattern>" [max-retries]
 ```
 
 Exit codes:
-- **0** — dispatch action still running. Sleep 60 seconds, retry.
-- **1** — nothing happening. Sleep 60 seconds, retry. Max 24 retries.
-- **2** — dispatch action failed. Report failure with URL.
+- **0** — matching label found (all labels printed to stdout).
+- **1** — max retries exhausted (default 20 retries = ~20 minutes).
 
 ---
 
