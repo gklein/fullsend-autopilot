@@ -28,9 +28,11 @@ HEAD_SHA=$(echo "$PR_DATA" | jq -r '.headRefOid // empty')
 echo "=== ACTION STATUS ==="
 
 if [[ -n "$HEAD_SHA" ]]; then
-  CHECK_RUNS=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
-    --jq '[.check_runs[] | select(.name | startswith("dispatch /"))]' \
+  ALL_CHECK_RUNS=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+    --jq '[.check_runs[]]' \
     2>/dev/null || echo "[]")
+
+  CHECK_RUNS=$(echo "$ALL_CHECK_RUNS" | jq '[.[] | select(.name | startswith("dispatch /"))]')
 
   echo "$CHECK_RUNS" | jq -r '.[]
     | "\(.name): \(.status) | conclusion: \(.conclusion // "pending") | \(.started_at) → \(.completed_at // "running")"'
@@ -75,6 +77,26 @@ if [[ -n "$HEAD_SHA" ]]; then
         echo "$WF_JOBS" | jq -r '.[] | "  \(.name): \(.status) (started \(.started_at))"'
       fi
     fi
+  fi
+else
+  echo "(unable to determine head SHA)"
+fi
+
+echo ""
+
+# --- CI check failures (non-dispatch: test suites, linters, etc.) ---
+echo "=== CI CHECK FAILURES ==="
+
+if [[ -n "$HEAD_SHA" ]]; then
+  CI_FAILED=$(echo "$ALL_CHECK_RUNS" | jq -r \
+    '[.[] | select(.name | startswith("dispatch /") | not) | select(.conclusion == "failure")]
+     | .[] | "\(.name): FAILED | \(.output.title // "no details") | \(.html_url // "")"' \
+    2>/dev/null || echo "")
+
+  if [[ -n "$CI_FAILED" ]]; then
+    echo "$CI_FAILED"
+  else
+    echo "(no CI check failures)"
   fi
 else
   echo "(unable to determine head SHA)"

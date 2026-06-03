@@ -397,6 +397,13 @@ the first `/fs-fix` comment in Phase 4.
 
 ## Phase 4 — Review and fix loop
 
+> **Role constraint:** In this phase, the local agent's job is to
+> COLLECT review feedback, COLLECT CI and local test failures, ANALYZE
+> whether failures are code bugs or stale tests, and RELAY everything
+> to `/fs-fix`. **Never modify application code, test code, or push
+> commits directly.** All fixes go through the remote fix agent via
+> `/fs-fix`.
+
 > In **PR mode**, `PR_NUMBER` and `IS_FORK` are already set from Input
 > Detection and Phase 0. Phase 3.4's local test run has not occurred yet,
 > so perform it now before entering the review loop.
@@ -433,7 +440,7 @@ gh pr checks <PR_NUMBER> --watch --fail-fast
 Run with **timeout 600000**. If timeout, fall back to polling
 (see Appendix).
 
-### 4.2 Collect review feedback
+### 4.2 Collect review feedback and CI failures
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/get-review-feedback.sh <PR_NUMBER>
@@ -442,6 +449,10 @@ bash ${CLAUDE_SKILL_DIR}/scripts/get-review-feedback.sh <PR_NUMBER>
 Check the `ACTION STATUS` section first:
 - If **"AGENT STILL RUNNING"** — sleep 60, retry step 4.1.
 - If **"AGENT JOB FAILED"** — report failure with URL and stop.
+
+Check the `CI CHECK FAILURES` section for failed non-dispatch checks
+(test suites, linters, etc.). These will be included in the `/fs-fix`
+comment at step 4.6.
 
 ### 4.3 Wait for review outcome labels
 
@@ -492,12 +503,27 @@ gh pr comment <PR_NUMBER> --body "$(bash ${CLAUDE_SKILL_DIR}/scripts/sanitize.sh
 - Reviewer's comment (quoted)
 - What needs to change>
 
+## CI test failures
+
+<For each failed CI check (from get-review-feedback.sh CI CHECK FAILURES):
+- Check name and failure description
+- Link to failed check run if available>
+
 ## Local test failures
 
 <For each local test failure (if any):
 - Test name and file (repo-relative)
 - Error output (sanitized — no absolute paths or env values)
-- What likely needs to change>
+- Classification: [CODE FIX] if the test expects correct behavior
+  and the code is wrong, or [TEST UPDATE] if the app behavior
+  legitimately changed and the test assertion is stale
+- Analysis: what is wrong and what should change>
+
+## Fix guidance
+
+Fix application code first. Only update test assertions if the code
+change is correct and the test expectation is stale — never adapt a
+test to hide a code bug.
 
 FIX_EOF
 )"
@@ -519,21 +545,25 @@ gh pr checks <PR_NUMBER> --watch --fail-fast
 
 ### 4.8 Re-run local tests
 
-```bash
-git checkout <PR_BRANCH> && git pull origin <PR_BRANCH>
-```
-
-Run the same test suite as step 3.4. If tests fail and the fix is
-trivial (e.g. a test assertion matching a panel border), fix and push
-locally, then **wait for the review workflow to re-run**:
+Pull the latest fix-agent changes:
 
 ```bash
-gh pr checks <PR_NUMBER> --watch --fail-fast
+git pull origin <PR_BRANCH>
 ```
 
-Poll `reviewDecision` until it returns a value (sleep 60, max 20
-retries). The review bot must evaluate the latest commit before the
-loop can check approval status.
+Run the same test suite as step 3.4 / 4.0. If all tests pass, proceed
+to 4.9.
+
+If tests fail, **analyze each failure** — read the failing test and the
+code it exercises. Classify:
+
+- **Code bug** — the test expects correct behavior but the code is
+  wrong. Tag as `[CODE FIX]` in the next `/fs-fix`.
+- **Stale test** — the app behavior legitimately changed and the test
+  assertion is outdated. Tag as `[TEST UPDATE]` in the next `/fs-fix`.
+
+Do NOT fix code or tests locally. Failures feed into the next loop
+iteration via step 4.6.
 
 ### 4.9 Loop back to 4.2
 
@@ -686,6 +716,7 @@ Exit codes:
 - Run local tests after PR creation and after each fix round.
 - Respect stop labels: `rejected`, `needs-human`, `fullsend-no-fix`.
 - Max 10 fix rounds before escalating to user.
+- Never modify code or push commits in Phase 4. Relay all fixes through `/fs-fix`.
 - Never force-push. Resolve conflicts via merge commits. Squash-merge PRs.
 - Never post `/fs-fix` on fork PRs.
 - All GitHub-bound text must pass through `sanitize.sh` — see "Data Sanitization".
