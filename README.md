@@ -1,6 +1,6 @@
 # fullsend-autopilot
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that drives an idea from description to merged PR — unattended. It orchestrates the [fullsend](https://github.com/fullsendai/fullsend) pipeline: triage, prioritize, code, review, fix, and merge — all autonomously. Can also start from an existing PR to drive just the review/fix, merge, and retro phases.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that drives an idea from description to merged PR — unattended. It orchestrates the [fullsend](https://github.com/fullsendai/fullsend) pipeline: triage, code, review, fix, and merge — all autonomously. Can also start from an existing PR to drive just the review/fix, merge, and retro phases.
 
 ## What it does
 
@@ -9,10 +9,9 @@ Give it a bug description, feature request, existing GitHub issue, or PR. The sk
 1. **Scan** the codebase for relevant context
 2. **Create** a detailed GitHub issue (or use an existing one)
 3. **Triage** via `/fs-triage` — answer clarifying questions from code if needed
-4. **Prioritize** via `/fs-prioritize` — get a RICE score
-5. **Code** via `/fs-code` — generate a PR
-6. **Review & fix** via `/fs-fix` — loop up to 10 rounds until approved
-7. **Merge** the PR and run `/fs-retro`
+4. **Code** via `/fs-code` — generate a PR
+5. **Review & fix** via `/fs-fix` — loop up to 10 rounds until approved
+6. **Merge** the PR and run `/fs-retro`
 
 The skill handles the full state machine: label routing, fork detection, merge conflicts, merge queues, local test runs, and fallback polling.
 
@@ -46,7 +45,7 @@ Invoke from Claude Code with a description, issue reference, or PR reference:
 /fullsend-autopilot https://github.com/owner/repo/issues/42
 ```
 
-Start from an existing PR (skips issue/triage/prioritize/code, jumps to review/fix):
+Start from an existing PR (skips issue/triage/code, jumps to review/fix):
 
 ```
 /fullsend-autopilot !42

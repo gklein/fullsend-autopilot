@@ -2,11 +2,11 @@
 name: fullsend-autopilot
 description: >
   Orchestrates the complete fullsend pipeline — scans the codebase, creates
-  or locates a GitHub issue, then drives triage, prioritize, code, review/fix,
+  or locates a GitHub issue, then drives triage, code, review/fix,
   merge, and retro to completion unattended. Can also start from an existing
-  PR to drive just the review/fix, merge, and retro phases. Invoked when a
-  user wants to go from an idea, issue, or PR reference to a merged PR with
-  zero manual steps.
+  PR to drive just the review/fix, merge, and retro phases. Invoked when
+  a user wants to go from an idea, issue, or PR reference to a merged PR
+  with zero manual steps.
 allowed-tools: >
   Bash(gh issue *)
   Bash(gh pr *)
@@ -40,11 +40,10 @@ Print this checklist at the start. Update after each phase.
 - [ ] Phase 0 — Sync
 - [ ] Phase 1 — Issue
 - [ ] Phase 2 — Triage
-- [ ] Phase 3 — Prioritize
-- [ ] Phase 4 — Code
-- [ ] Phase 5 — Review/Fix
-- [ ] Phase 6 — Merge
-- [ ] Phase 7 — Retro
+- [ ] Phase 3 — Code
+- [ ] Phase 4 — Review/Fix
+- [ ] Phase 5 — Merge
+- [ ] Phase 6 — Retro
 ```
 
 **PR-mode checklist** (when input is a PR reference):
@@ -53,14 +52,13 @@ Print this checklist at the start. Update after each phase.
 - [ ] Phase 0 — Sync
 - [-] Phase 1 — Issue (skipped — PR mode)
 - [-] Phase 2 — Triage (skipped — PR mode)
-- [-] Phase 3 — Prioritize (skipped — PR mode)
-- [-] Phase 4 — Code (skipped — PR mode)
-- [ ] Phase 5 — Review/Fix
-- [ ] Phase 6 — Merge
-- [ ] Phase 7 — Retro
+- [-] Phase 3 — Code (skipped — PR mode)
+- [ ] Phase 4 — Review/Fix
+- [ ] Phase 5 — Merge
+- [ ] Phase 6 — Retro
 ```
 
-Report after each phase: `[autopilot] Phase N/7 — <Name> — <outcome>`
+Report after each phase: `[autopilot] Phase N/6 — <Name> — <outcome>`
 
 ---
 
@@ -143,9 +141,9 @@ ISSUE_NUMBER=$(gh pr view <PR_NUMBER> --json body --jq '.body' 2>/dev/null \
   | head -1 | grep -oE '[0-9]+' || echo "")
 ```
 
-If empty, `ISSUE_NUMBER` remains unset — Phase 7 will adapt.
+If empty, `ISSUE_NUMBER` remains unset — Phase 6 will adapt.
 
-**Skip Phases 1–4. Proceed to Phase 0 (PR variant), then Phase 5.**
+**Skip Phases 1–3. Proceed to Phase 0 (PR variant), then Phase 4.**
 
 ### Issue mode
 
@@ -194,8 +192,8 @@ Phase 1.
 
 ## Phase 1 — Create or locate the issue
 
-> **PR mode:** Skip this entire phase. Phases 2, 3, and 4 are also skipped.
-> Jump directly to Phase 5.
+> **PR mode:** Skip this entire phase. Phases 2 and 3 are also skipped.
+> Jump directly to Phase 4.
 
 ### 1.1 Detect input type
 
@@ -310,7 +308,7 @@ Route based on labels:
 | `needs-info` | AI answers from code. Pull latest, scan for answers, **sanitize** and post comment. Wait for re-triage. If still `needs-info`, **STOP**. |
 | `duplicate` | **STOP.** Report the original issue. |
 | `blocked` | **STOP.** Report the blocker. |
-| `ready-to-code` / `triaged` | Proceed to Phase 3. |
+| `ready-to-code` / `triaged` | Proceed to Phase 3 (Code). |
 | None of the above | **STOP.** Print labels. |
 
 When posting a `needs-info` answer, pipe through the sanitizer:
@@ -324,40 +322,11 @@ INFO_EOF
 
 ---
 
-## Phase 3 — Prioritize
+## Phase 3 — Code
 
 > **PR mode:** Skip this phase entirely.
 
-### 3.1 Post the prioritize command
-
-```bash
-BEFORE_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-gh issue comment <ISSUE_NUMBER> --body "/fs-prioritize"
-```
-
-### 3.2 Wait for the prioritize workflow
-
-```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/wait-for-run.sh issue <ISSUE_NUMBER> "$BEFORE_TS" Prioritize
-```
-
-Run with **timeout 600000**. Handle exit codes same as Phase 2.
-
-### 3.3 Fetch and display prioritization results
-
-```bash
-bash ${CLAUDE_SKILL_DIR}/scripts/check-comments.sh issue <ISSUE_NUMBER> "$BEFORE_TS"
-```
-
-Proceed to Phase 4.
-
----
-
-## Phase 4 — Code
-
-> **PR mode:** Skip this phase entirely.
-
-### 4.0 Pre-check blocking labels
+### 3.0 Pre-check blocking labels
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/check-labels.sh issue <ISSUE_NUMBER>
@@ -366,14 +335,14 @@ bash ${CLAUDE_SKILL_DIR}/scripts/check-labels.sh issue <ISSUE_NUMBER>
 - If `blocked` → **STOP.** Report the blocker.
 - If `pr-open` → **STOP.** Report "Human PR already exists for this issue."
 
-### 4.1 Post the code command
+### 3.1 Post the code command
 
 ```bash
 BEFORE_TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 gh issue comment <ISSUE_NUMBER> --body "/fs-code"
 ```
 
-### 4.2 Wait for the code agent
+### 3.2 Wait for the code agent
 
 The code agent may run for several minutes. Use **`run_in_background: true`**:
 
@@ -383,7 +352,7 @@ bash ${CLAUDE_SKILL_DIR}/scripts/wait-for-run.sh issue <ISSUE_NUMBER> "$BEFORE_T
 
 Handle exit codes same as Phase 2.
 
-### 4.3 Find the PR
+### 3.3 Find the PR
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/find-pr-for-issue.sh <ISSUE_NUMBER>
@@ -400,9 +369,9 @@ IS_FORK=$(gh api "repos/${REPO}/pulls/<PR_NUMBER>" \
   --jq 'if .head.repo.full_name != .base.repo.full_name then "FORK" else "SAME" end')
 ```
 
-Note the result. If `FORK`, the fix agent will be blocked in Phase 5.
+Note the result. If `FORK`, the fix agent will be blocked in Phase 4.
 
-### 4.4 Local test run
+### 3.4 Local test run
 
 Check out the PR branch and run all discoverable tests locally:
 
@@ -419,19 +388,19 @@ Detect the test framework and run tests:
 Capture any test failures — test name, file, error output. **Sanitize
 all test output** (strip absolute paths, replace with repo-relative).
 If failures are found, they will be included as additional context in
-the first `/fs-fix` comment in Phase 5.
+the first `/fs-fix` comment in Phase 4.
 
 ---
 
-## Phase 5 — Review and fix loop
+## Phase 4 — Review and fix loop
 
 > In **PR mode**, `PR_NUMBER` and `IS_FORK` are already set from Input
-> Detection and Phase 0. Phase 4.4's local test run has not occurred yet,
+> Detection and Phase 0. Phase 3.4's local test run has not occurred yet,
 > so perform it now before entering the review loop.
 
-### 5.0 Initial local test run (PR mode only)
+### 4.0 Initial local test run (PR mode only)
 
-If entering Phase 5 from PR mode (Phase 4 was skipped), run the local
+If entering Phase 4 from PR mode (Phase 3 was skipped), run the local
 test suite first. The PR branch is already checked out from Phase 0.
 
 Detect the test framework and run tests:
@@ -443,7 +412,7 @@ Detect the test framework and run tests:
 Capture any test failures — test name, file, error output. **Sanitize
 all test output** (strip absolute paths, replace with repo-relative).
 If failures are found, they will be included as additional context in
-the first `/fs-fix` comment in step 5.6.
+the first `/fs-fix` comment in step 4.6.
 
 ---
 
@@ -452,7 +421,7 @@ feedback, or 10 fix rounds are exhausted.
 
 Initialize: `FIX_ROUND=0`
 
-### 5.1 Wait for review checks
+### 4.1 Wait for review checks
 
 ```bash
 gh pr checks <PR_NUMBER> --watch --fail-fast
@@ -461,17 +430,17 @@ gh pr checks <PR_NUMBER> --watch --fail-fast
 Run with **timeout 600000**. If timeout, fall back to polling
 (see Appendix).
 
-### 5.2 Collect review feedback
+### 4.2 Collect review feedback
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/get-review-feedback.sh <PR_NUMBER>
 ```
 
 Check the `ACTION STATUS` section first:
-- If **"AGENT STILL RUNNING"** — sleep 60, retry step 5.1.
+- If **"AGENT STILL RUNNING"** — sleep 60, retry step 4.1.
 - If **"AGENT JOB FAILED"** — report failure with URL and stop.
 
-### 5.3 Check review outcome labels
+### 4.3 Check review outcome labels
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/check-labels.sh pr <PR_NUMBER>
@@ -479,26 +448,26 @@ bash ${CLAUDE_SKILL_DIR}/scripts/check-labels.sh pr <PR_NUMBER>
 
 | Label | Route |
 |-------|-------|
-| `ready-for-merge` | Check for open items first. If none, Phase 6. If items remain, proceed to 5.4. |
+| `ready-for-merge` | Check for open items first. If none, Phase 5. If items remain, proceed to 4.4. |
 | `requires-manual-review` | AI attempts to address. If still flagged after fix, **STOP**. |
 | `rejected` | **STOP.** |
 | `needs-human` | **STOP.** |
 | `fullsend-no-fix` | **STOP.** |
-| None of the above | Changes requested → proceed to 5.4. |
+| None of the above | Changes requested → proceed to 4.4. |
 
-### 5.4 Filter to new feedback only
+### 4.4 Filter to new feedback only
 
 Build a list of **new-only** items: unaddressed inline comments, updated
 comments, regressions, and local test failures. Exclude items already
 fixed that have not regressed.
 
-### 5.5 Check for fork PR
+### 4.5 Check for fork PR
 
-If the fork check (from Phase 0 step 3 in PR mode, or step 4.3 in
+If the fork check (from Phase 0 step 3 in PR mode, or step 3.3 in
 issue mode) returned `FORK`, **STOP** and report:
 "Fork PR — fix agent blocked for security. Manual fixes required."
 
-### 5.6 Post /fs-fix with content
+### 4.6 Post /fs-fix with content
 
 Increment: `FIX_ROUND=$((FIX_ROUND + 1))`
 
@@ -528,9 +497,9 @@ FIX_EOF
 )"
 ```
 
-### 5.7 Wait for fix, then review
+### 4.7 Wait for fix, then review
 
-**Important:** Pass the literal timestamp value from 5.6, not a variable:
+**Important:** Pass the literal timestamp value from 4.6, not a variable:
 
 ```bash
 bash ${CLAUDE_SKILL_DIR}/scripts/wait-for-run.sh pr <PR_NUMBER> "<REVIEW_TS_VALUE>" Fix
@@ -542,13 +511,13 @@ After the fix agent finishes, wait for review checks:
 gh pr checks <PR_NUMBER> --watch --fail-fast
 ```
 
-### 5.8 Re-run local tests
+### 4.8 Re-run local tests
 
 ```bash
 git checkout <PR_BRANCH> && git pull origin <PR_BRANCH>
 ```
 
-Run the same test suite as step 4.4. If tests fail and the fix is
+Run the same test suite as step 3.4. If tests fail and the fix is
 trivial (e.g. a test assertion matching a panel border), fix and push
 locally, then **wait for the review workflow to re-run**:
 
@@ -560,16 +529,16 @@ Poll `reviewDecision` until it returns a value (sleep 30, max 20
 retries). The review bot must evaluate the latest commit before the
 loop can check approval status.
 
-### 5.9 Loop back to 5.2
+### 4.9 Loop back to 4.2
 
 Continue until APPROVED with no open items and tests pass, or 10 fix
 rounds exhausted → **STOP**.
 
 ---
 
-## Phase 6 — Merge
+## Phase 5 — Merge
 
-### 6.1 Wait for checks and verify approval
+### 5.1 Wait for checks and verify approval
 
 First, wait for all PR checks (including the review workflow) to finish:
 
@@ -588,9 +557,9 @@ gh pr view <PR_NUMBER> --json reviewDecision --jq .reviewDecision
 
 If the result is empty or not `APPROVED`, sleep 30 seconds and retry.
 Max 20 retries (~10 minutes). If still not `APPROVED` after retries,
-go back to Phase 5.
+go back to Phase 4.
 
-### 6.2 Check for merge conflicts
+### 5.2 Check for merge conflicts
 
 ```bash
 gh pr view <PR_NUMBER> --json mergeable --jq .mergeable
@@ -610,7 +579,7 @@ git push
 gh pr checks <PR_NUMBER> --watch --fail-fast
 ```
 
-### 6.3 Merge the PR
+### 5.3 Merge the PR
 
 Merge directly. If merge queue required, retry with `--merge-queue`:
 
@@ -624,7 +593,7 @@ gh pr merge <PR_NUMBER> --merge-queue
 
 ---
 
-## Phase 7 — Cleanup and retrospective
+## Phase 6 — Cleanup and retrospective
 
 1. Close the issue if known and still open:
    ```bash
@@ -648,7 +617,6 @@ gh pr merge <PR_NUMBER> --merge-queue
 Issue:    #<NUMBER> — <title> — <url>    (or "N/A — started from PR" if no linked issue)
 PR:       #<NUMBER> — <title> — <url>
 Triage:   <outcome label>                (or "skipped — PR mode")
-RICE:     <score or "not scored">        (or "skipped — PR mode")
 Code:     PR created by <author>         (or "skipped — PR mode")
 Review:   <disposition>
 Fix:      <N> round(s)
