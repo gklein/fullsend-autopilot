@@ -133,15 +133,52 @@ gh pr view <PR_NUMBER> --json state,number,title,headRefName \
 If the PR state is `MERGED` or `CLOSED`, **STOP** with a message:
 "PR #NNN is already <state>. Nothing to do."
 
-Attempt to discover a linked issue:
+Attempt to discover a linked issue. Try three methods in order — use the
+first that returns a result:
+
+**Method 1 — GitHub closing-references API** (catches sidebar-linked issues
+and keyword references GitHub has already parsed):
 
 ```bash
-ISSUE_NUMBER=$(gh pr view <PR_NUMBER> --json body --jq '.body' 2>/dev/null \
-  | grep -oiE '(closes|fixes|resolves|close|fix|resolve) #([0-9]+)' \
-  | head -1 | grep -oE '[0-9]+' || echo "")
+REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+ISSUE_NUMBER=$(gh api graphql -f query='
+  query($owner:String!,$repo:String!,$pr:Int!) {
+    repository(owner:$owner,name:$repo) {
+      pullRequest(number:$pr) {
+        closingIssuesReferences(first:1) {
+          nodes { number }
+        }
+      }
+    }
+  }' -f owner="${REPO%%/*}" -f repo="${REPO##*/}" -F pr=<PR_NUMBER> \
+  --jq '.data.repository.pullRequest.closingIssuesReferences.nodes[0].number // empty' 2>/dev/null || echo "")
 ```
 
-If empty, `ISSUE_NUMBER` remains unset — Phase 6 will adapt.
+**Method 2 — grep the PR body** for closing keywords:
+
+```bash
+if [ -z "$ISSUE_NUMBER" ]; then
+  ISSUE_NUMBER=$(gh pr view <PR_NUMBER> --json body --jq '.body' 2>/dev/null \
+    | grep -oiE '(closes|fixes|resolves|close|fix|resolve) #([0-9]+)' \
+    | head -1 | grep -oE '[0-9]+' || echo "")
+fi
+```
+
+**Method 3 — branch name convention** (`agent/<ISSUE>-*` or `<ISSUE>-*`):
+
+```bash
+if [ -z "$ISSUE_NUMBER" ]; then
+  BRANCH=$(gh pr view <PR_NUMBER> --json headRefName --jq .headRefName 2>/dev/null || echo "")
+  ISSUE_NUMBER=$(echo "$BRANCH" | grep -oE '^(agent/)?[0-9]+' | grep -oE '[0-9]+' || echo "")
+  # Verify the extracted number is actually an open issue
+  if [ -n "$ISSUE_NUMBER" ]; then
+    gh issue view "$ISSUE_NUMBER" --json number --jq .number 2>/dev/null || ISSUE_NUMBER=""
+  fi
+fi
+```
+
+If still empty after all three methods, `ISSUE_NUMBER` remains unset —
+Phase 5.4 and Phase 6 will adapt.
 
 **Skip Phases 1–3. Proceed to Phase 0 (PR variant), then Phase 4.**
 
@@ -627,25 +664,35 @@ gh pr merge <PR_NUMBER> --squash --delete-branch
 gh pr merge <PR_NUMBER> --merge-queue
 ```
 
+### 5.4 Close the linked issue
+
+If `ISSUE_NUMBER` is set and the issue is still open, close it with a
+reference to the merged PR:
+
+```bash
+# Only if ISSUE_NUMBER is set (skip if no linked issue)
+STATE=$(gh issue view <ISSUE_NUMBER> --json state --jq .state 2>/dev/null || echo "")
+if [ "$STATE" = "OPEN" ]; then
+  REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+  gh issue close <ISSUE_NUMBER> --comment "$(bash ${CLAUDE_SKILL_DIR}/scripts/sanitize.sh <<CLOSE_EOF
+Closed by #<PR_NUMBER> (merged).
+CLOSE_EOF
+)"
+fi
+```
+
 ---
 
 ## Phase 6 — Cleanup and retrospective
 
-1. Close the issue if known and still open:
-   ```bash
-   # Only if ISSUE_NUMBER is set (skip in PR mode with no linked issue)
-   STATE=$(gh issue view <ISSUE_NUMBER> --json state --jq .state)
-   gh issue close <ISSUE_NUMBER>  # only if still open
-   ```
-
-2. Post `/fs-retro` (do not wait):
+1. Post `/fs-retro` (do not wait):
    ```bash
    gh pr comment <PR_NUMBER> --body "/fs-retro"
    # Only if ISSUE_NUMBER is set:
    gh issue comment <ISSUE_NUMBER> --body "/fs-retro"
    ```
 
-3. Print pipeline summary:
+2. Print pipeline summary:
 
 ```
 [autopilot] ═══ Pipeline Complete ═══
